@@ -12,115 +12,137 @@ from reportlab.platypus import Table, TableStyle
 try:
     locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')
 except:
-    locale.setlocale(locale.LC_ALL, '')
+    pass
 
 COR_PRIMARIA = "#1A3366"
 COR_SECUNDARIA = "#F4F7FA"
 COR_TEXTO = "#2C3E50"
 COR_ACENTO = "#27AE60"
 
+def moeda(valor):
+    # Formatação manual robusta para evitar conflitos de locale
+    return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
 # ================= CÁLCULOS =================
 
-
 def calcular_inss(salario):
-    return salario * 0.08
-
+    # Tabelas 2024/2025 (Valores aproximados conforme sua lógica)
+    faixas = [
+        (1412.00, 0.075),
+        (2666.68, 0.09),
+        (4000.03, 0.12),
+        (7786.02, 0.14)
+    ]
+    desconto = 0
+    limite_anterior = 0
+    
+    if salario <= 0: return 0
+    
+    for limite, aliquota in faixas:
+        if salario > limite:
+            desconto += (limite - limite_anterior) * aliquota
+            limite_anterior = limite
+        else:
+            desconto += (salario - limite_anterior) * aliquota
+            return round(desconto, 2)
+    return 908.85 
 
 def calcular_irrf(base):
-    return base * 0.075
-
+    if base <= 2259.20:
+        return 0
+    elif base <= 2826.65:
+        return (base * 0.075) - 169.44
+    elif base <= 3751.05:
+        return (base * 0.15) - 381.44
+    elif base <= 4664.68:
+        return (base * 0.225) - 662.77
+    else:
+        return (base * 0.275) - 896.00
 
 def calcular_horas_extra(salario, horas):
+    if salario <= 0 or horas <= 0: return 0
     return horas * ((salario / 220) * 1.5)
 
-# ================= LÓGICA =================
-
+# ================= LÓGICA DE DADOS =================
 
 def obter_dados():
     try:
+        # Limpeza para aceitar diversos formatos de entrada numérica
+        sal_limpo = e_salario.get().replace('R$', '').replace('.', '').replace(',', '.').strip()
+        horas_limpas = e_horas.get().replace(',', '.').strip()
+        
         return {
-            "nome": e_nome.get(),
-            "cpf": e_cpf.get(),
-            "cargo": e_cargo.get(),
-            "salario": float(e_salario.get().replace(',', '.') or 0),
-            "horas": int(e_horas.get() or 0)
+            "nome": e_nome.get().strip(),
+            "cpf": e_cpf.get().strip(),
+            "cargo": e_cargo.get().strip(),
+            "salario": float(sal_limpo or 0),
+            "horas": float(horas_limpas or 0)
         }
     except ValueError:
-        messagebox.showerror("Erro", "Use apenas números.")
+        messagebox.showerror("Erro de Valor", "Verifique o Salário e as Horas. Use apenas números.")
         return None
-
 
 def atualizar_resumo():
     d = obter_dados()
-    if not d:
-        return
+    if not d: return
 
     h = calcular_horas_extra(d['salario'], d['horas'])
     inss = calcular_inss(d['salario'])
-    irrf = calcular_irrf(d['salario'] - inss)
-    total = d['salario'] + h - inss - irrf
+    # Base IRRF = Salário + Horas - INSS
+    base_irrf = (d['salario'] + h) - inss
+    irrf = max(0, calcular_irrf(base_irrf))
+    total = (d['salario'] + h) - inss - irrf
 
-    lbl_salario.config(text=locale.currency(d['salario'], grouping=True))
-    lbl_horas.config(text=locale.currency(h, grouping=True))
-    lbl_inss.config(
-        text=f"- {locale.currency(inss, grouping=True)}", fg="#E74C3C")
-    lbl_irrf.config(
-        text=f"- {locale.currency(irrf, grouping=True)}", fg="#E74C3C")
-    lbl_final.config(text=locale.currency(total, grouping=True), fg=COR_ACENTO)
+    lbl_salario.config(text=moeda(d['salario']))
+    lbl_horas.config(text=moeda(h))
+    lbl_inss.config(text=f"- {moeda(inss)}", fg="#E74C3C")
+    lbl_irrf.config(text=f"- {moeda(irrf)}", fg="#E74C3C")
+    lbl_final.config(text=moeda(total), fg=COR_ACENTO)
 
-# ================= PDF =================
-
+# ================= GERAÇÃO DE PDF =================
 
 def gerar_pdf():
     d = obter_dados()
-    if not d or not d['nome'] or not d['cpf']:
-        messagebox.showwarning("Atenção", "Preencha Nome e CPF.")
+    if not d: return
+
+    if not d['nome'] or not d['cpf'] or not d['cargo']:
+        messagebox.showwarning("Campos Obrigatórios", 
+                               "Atenção! Preencha NOME, CPF e CARGO para gerar o PDF.")
         return
 
-    inss = calcular_inss(d['salario'])
     h = calcular_horas_extra(d['salario'], d['horas'])
-    irrf = calcular_irrf(d['salario'] - inss)
-    total = d['salario'] + h - inss - irrf
+    inss = calcular_inss(d['salario'])
+    base_irrf = (d['salario'] + h) - inss
+    irrf = max(0, calcular_irrf(base_irrf))
+    total = (d['salario'] + h) - inss - irrf
 
-    c = canvas.Canvas(f"Holerite_{d['nome'].split()[0]}.pdf", pagesize=letter)
+    nome_arquivo = f"Holerite_{d['nome'].replace(' ', '_')}.pdf"
+    c = canvas.Canvas(nome_arquivo, pagesize=letter)
 
-    # ===== HEADER =====
+    # Design do Cabeçalho
     c.setFillColor(COR_PRIMARIA)
     c.rect(0, 700, 612, 112, fill=1, stroke=0)
-
-    # LOGO NO CANTO SUPERIOR ESQUERDO
-    logo = "logo_header.png"
-    if os.path.exists(logo):
-        c.drawImage(
-            logo,
-            40,      # X esquerdo
-            735,     # Y topo
-            width=150,
-            height=55,
-            mask="auto"
-        )
-
-    # TÍTULO À DIREITA
     c.setFillColor(colors.white)
-    c.setFont("Helvetica-Bold", 14)
-    c.drawRightString(570, 755, "DEMONSTRATIVO DE PAGAMENTO")
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(40, 750, "PRIME SYSTEMS - PAYROLL")
     c.setFont("Helvetica", 10)
+    c.drawRightString(570, 755, "DEMONSTRATIVO DE PAGAMENTO")
     c.drawRightString(570, 740, "Janeiro / 2026")
 
-    # ===== DADOS =====
+    # Informações do Colaborador
     c.setFillColor(COR_TEXTO)
     c.setFont("Helvetica-Bold", 12)
     c.drawString(40, 670, f"COLABORADOR: {d['nome'].upper()}")
     c.setFont("Helvetica", 10)
     c.drawString(40, 655, f"CPF: {d['cpf']}  |  CARGO: {d['cargo']}")
 
-    # ===== TABELA =====
+    # Tabela de Lançamentos
     dados_tabela = [
         ['DESCRIÇÃO', 'REF', 'PROVENTOS', 'DESCONTOS'],
-        ['Salário Base', '30d', f"{d['salario']:,.2f}", ''],
-        ['Horas Extras (50%)', f"{d['horas']}h", f"{h:,.2f}", ''],
-        ['INSS', '8%', '', f"{inss:,.2f}"],
-        ['IRRF', '7.5%', '', f"{irrf:,.2f}"],
+        ['Salário Base', '30d', moeda(d['salario']), ''],
+        ['Horas Extras (50%)', f"{d['horas']}h", moeda(h), ''],
+        ['INSS', '', '', moeda(inss)],
+        ['IRRF', '', '', moeda(irrf)],
     ]
 
     t = Table(dados_tabela, colWidths=[2.5*inch, 0.8*inch, 1.2*inch, 1.2*inch])
@@ -135,49 +157,44 @@ def gerar_pdf():
     t.wrapOn(c, 40, 500)
     t.drawOn(c, 40, 500)
 
-    # ===== TOTAL =====
+    # Totalizador
     c.setFillColor(COR_PRIMARIA)
     c.rect(343, 440, 228, 35, fill=1)
     c.setFillColor(colors.white)
     c.setFont("Helvetica-Bold", 12)
     c.drawString(355, 452, "VALOR LÍQUIDO:")
-    c.drawRightString(560, 452, f"R$ {total:,.2f}")
+    c.drawRightString(560, 452, moeda(total))
 
     c.save()
-    messagebox.showinfo("Sucesso", "PDF gerado com sucesso!")
+    messagebox.showinfo("Sucesso", f"O PDF '{nome_arquivo}' foi gerado!")
 
-# ================= INTERFACE =================
-
+# ================= INTERFACE GRÁFICA =================
 
 root = Tk()
 root.title("PrimeSystems - Folha de Pagamento")
 root.geometry("1100x750")
 root.configure(bg=COR_SECUNDARIA)
-root.resizable(True, True)
 
+# Header
 header = Frame(root, bg=COR_PRIMARIA, height=100)
 header.pack(fill="x")
-Label(header, text="SISTEMA DE FOLHA DE PAGAMENTO",
-      bg=COR_PRIMARIA, fg="white",
-      font=("Helvetica", 22, "bold")).pack(pady=30)
+Label(header, text="WageCore System", bg=COR_PRIMARIA, fg="white", font=("Helvetica", 27, "bold")).pack(pady=30)
 
+# Layout Principal
 main = Frame(root, bg=COR_SECUNDARIA)
 main.pack(fill="both", expand=True, padx=40, pady=30)
 main.columnconfigure(0, weight=3)
 main.columnconfigure(1, weight=1)
 
-# Inputs
-f_inputs = LabelFrame(main, text=" Cadastro do Colaborador ",
-                      bg=COR_SECUNDARIA, font=("Helvetica", 14, "bold"),
-                      padx=30, pady=30)
+# Seção de Cadastro
+f_inputs = LabelFrame(main, text=" Cadastro do Colaborador ", bg=COR_SECUNDARIA, font=("Helvetica", 14, "bold"), padx=30, pady=30)
 f_inputs.grid(row=0, column=0, sticky="nsew", padx=(0, 20))
 
-labels = ["Nome:", "CPF:", "Cargo:", "Salário Base:", "Horas Extras:"]
+labels = ["Nome:", "CPF:", "Cargo:", "Salário Bruto:", "Horas Extras:"]
 entries = []
 
-for i, t in enumerate(labels):
-    Label(f_inputs, text=t, bg=COR_SECUNDARIA,
-          font=("Helvetica", 12)).grid(row=i, column=0, sticky="w", pady=12)
+for i, text_label in enumerate(labels):
+    Label(f_inputs, text=text_label, bg=COR_SECUNDARIA, font=("Helvetica", 12)).grid(row=i, column=0, sticky="w", pady=12)
     e = Entry(f_inputs, font=("Helvetica", 14))
     e.grid(row=i, column=1, pady=12, sticky="ew")
     entries.append(e)
@@ -185,47 +202,31 @@ for i, t in enumerate(labels):
 f_inputs.columnconfigure(1, weight=1)
 e_nome, e_cpf, e_cargo, e_salario, e_horas = entries
 
-# Resumo
-f_resumo = LabelFrame(main, text=" Resumo ",
-                      bg="white", font=("Helvetica", 14, "bold"),
-                      padx=30, pady=30)
+# Seção de Resumo Lateral
+f_resumo = LabelFrame(main, text=" Resumo ", bg="white", font=("Helvetica", 14, "bold"), padx=30, pady=30)
 f_resumo.grid(row=0, column=1, sticky="nsew")
 
-lbl_salario = Label(f_resumo, text="R$ 0,00",
-                    bg="white", font=("Helvetica", 13))
+lbl_salario = Label(f_resumo, text="R$ 0,00", bg="white", font=("Helvetica", 13))
 lbl_horas = Label(f_resumo, text="R$ 0,00", bg="white", font=("Helvetica", 13))
 lbl_inss = Label(f_resumo, text="R$ 0,00", bg="white", font=("Helvetica", 13))
 lbl_irrf = Label(f_resumo, text="R$ 0,00", bg="white", font=("Helvetica", 13))
-lbl_final = Label(f_resumo, text="R$ 0,00", bg="white",
-                  font=("Helvetica", 22, "bold"), fg=COR_ACENTO)
+lbl_final = Label(f_resumo, text="R$ 0,00", bg="white", font=("Helvetica", 22, "bold"), fg=COR_ACENTO)
 
-res = [("Bruto:", lbl_salario), ("Extras:", lbl_horas),
-       ("INSS:", lbl_inss), ("IRRF:", lbl_irrf)]
+res = [("Bruto:", lbl_salario), ("Extras:", lbl_horas), ("INSS:", lbl_inss), ("IRRF:", lbl_irrf)]
 
 for i, (txt, lbl) in enumerate(res):
-    Label(f_resumo, text=txt, bg="white",
-          font=("Helvetica", 12)).grid(row=i, column=0, sticky="w", pady=10)
+    Label(f_resumo, text=txt, bg="white", font=("Helvetica", 12)).grid(row=i, column=0, sticky="w", pady=10)
     lbl.grid(row=i, column=1, sticky="e")
 
-ttk.Separator(f_resumo, orient="horizontal").grid(
-    row=4, column=0, columnspan=2, sticky="ew", pady=20)
-
-Label(f_resumo, text="LÍQUIDO:", bg="white",
-      font=("Helvetica", 14, "bold")).grid(row=5, column=0, sticky="w")
+ttk.Separator(f_resumo, orient="horizontal").grid(row=4, column=0, columnspan=2, sticky="ew", pady=20)
+Label(f_resumo, text="LÍQUIDO:", bg="white", font=("Helvetica", 14, "bold")).grid(row=5, column=0, sticky="w")
 lbl_final.grid(row=5, column=1, sticky="e")
 
-# Botões
+# Botões de Ação
 f_btns = Frame(root, bg=COR_SECUNDARIA)
 f_btns.pack(pady=30)
 
-Button(f_btns, text="CALCULAR", command=atualizar_resumo,
-       bg=COR_ACENTO, fg="white",
-       font=("Helvetica", 12, "bold"),
-       width=25, height=2).pack(side="left", padx=20)
-
-Button(f_btns, text="GERAR PDF", command=gerar_pdf,
-       bg=COR_PRIMARIA, fg="white",
-       font=("Helvetica", 12, "bold"),
-       width=25, height=2).pack(side="left", padx=20)
+Button(f_btns, text="CALCULAR", command=atualizar_resumo, bg=COR_ACENTO, fg="white", font=("Helvetica", 12, "bold"), width=25, height=2, cursor="hand2").pack(side="left", padx=20)
+Button(f_btns, text="GERAR PDF", command=gerar_pdf, bg=COR_PRIMARIA, fg="white", font=("Helvetica", 12, "bold"), width=25, height=2, cursor="hand2").pack(side="left", padx=20)
 
 root.mainloop()
