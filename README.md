@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="./assets/Holerite.png" alt="Holerite Gerado" width="600px">
+  <img src="./assets/Holerite.png" alt="holerite Gerado" width="600px">
 </p>
 
 ---
