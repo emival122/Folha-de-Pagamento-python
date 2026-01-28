@@ -45,7 +45,7 @@ Desenvolvido com foco em **precisão fiscal**, o sistema realiza cálculos compl
 ---
 
 ## 📘 Documentação
-Consulte nossos manuais detalhados para entender as regras de cálculo e operação:
+Consulte os manuais detalhados para entender as regras de cálculo e operação:
 
 * [📄 **Documentação Técnica**](./docs/tecnico.md): Detalhamento das alíquotas, lógica de impostos e estrutura de arquivos.
 * [👤 **Manual do Usuário**](./docs/manual_usuario.md): Guia de preenchimento, cálculo e exportação de PDFs.
